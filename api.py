@@ -9,6 +9,7 @@ import binascii
 
 # https://blog.miguelgrinberg.com/post/restful-authentication-with-flask
 # https://github.com/miguelgrinberg/REST-auth/blob/master/api.py
+# https://flask-httpauth.readthedocs.io/en/latest/
 
 DATABASE_FILE_NAME = 'db.sqlite3'
 app = Flask(__name__)
@@ -70,14 +71,21 @@ def verify_password(username_or_token, password):
     g.user = user
     return True
 
+@auth.get_user_roles
+def get_user_roles(_):
+    return list(map(lambda role: role.name, g.user.roles))
+
 @app.route('/api/users', methods=['POST'])
 def new_user():
-    username, password = request.json.get('username'), request.json.get('password')
-    if username is None or password is None:
+    username, password, role = request.json.get('username'), request.json.get('password'), request.json.get('role')
+    if username is None or password is None or role is None:
         abort(400)  # missing arguments
     if User.query.filter_by(username=username).first():
         abort(400)  # existing user
-    user = User(username=username, password_hash=hash_password(password))
+    role = Role.query.filter_by(name=role).first()
+    if not role:
+        abort(400)  # role not found
+    user = User(username=username, password_hash=hash_password(password), roles=[role])
     db.session.add(user)
     db.session.commit()
     return (jsonify({'username': user.username}), 201,
@@ -101,7 +109,16 @@ def get_auth_token():
 def get_resource():
     return jsonify({'data': 'Hello, %s!' % g.user.username})
 
+@app.route('/api/resource-critical')
+@auth.login_required(role=['admin', 'supporter'])
+def get_resource_critical():
+    return jsonify({'data': '(Critical) Hello, %s!' % g.user.username})
+
 if __name__ == '__main__':
     if not os.path.exists(DATABASE_FILE_NAME):
         db.create_all()
+        db.session.add(Role(name='admin'))
+        db.session.add(Role(name='supporter'))
+        db.session.add(Role(name='user'))
+        db.session.commit()
     app.run(host='0.0.0.0', port='8080')
