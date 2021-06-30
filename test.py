@@ -1,11 +1,10 @@
 import requests
 import random
 import string
-import base64
 import json
 import os
 
-URL = 'http://0.0.0.0:8080'
+URL = 'http://192.168.0.32:8080'
 
 # region load/create users
 TEST_USERS_FILE = 'test_users.json'
@@ -23,37 +22,50 @@ if create_users:
     for user_role in user_roles:
         username = 'user-' + ''.join(random.choice(string.digits) for i in range(8))
         password = 'password'
-        r = requests.post(URL + '/api/users', json={'username': username, 'password': password, 'role': user_role})
+        r = requests.post(URL + '/api/create-user', json={
+            'username': username,
+            'password': password,
+            'role': user_role
+        })
         if r.status_code != 201:
             print(r.text)
             exit(1)
-        users.append({'username': username, 'password': password, 'role': user_role})
+        users.append({
+            'username': username,
+            'password': password,
+            'role': user_role
+        })
         print(f'"{username}:{password}" as "{user_role}" created!')
     with open(TEST_USERS_FILE, 'w') as file:
         json.dump(users, file, indent=2)
         file.close()
 # endregion
 
-# region requests session and test roles
-def get_auth_header(username: str, password: str) -> str:
-    return 'Basic ' + base64.b64encode(f'{username}:{password}'.encode('utf-8')).decode('utf-8')
-
 for user in users:
     print('####################')
     # create session
     session = requests.session()
-    session.headers['Authorization'] = get_auth_header(user['username'], user['password'])
-    r = session.get(URL + '/api/token')
-    if r.status_code != 200:
+    r = session.post(URL + '/api/create-session', json={
+        'username': user['username'],
+        'password': user['password']
+    })
+    if r.status_code != 201:
         print(r.text)
         exit(1)
-    token = r.json()['token']
-    session.headers['Authorization'] = get_auth_header(token, None)
+    session.headers['Authorization'] = r.json()['token']
     print(f'Session for user "{user["username"]}" instantiated!')
     # request resources
-    paths = ['/api/resource', '/api/resource-critical']
+    paths = ['/api/resource', '/api/resource-critical', '/api/resource-critical']
+    i, logout_at_count = 0, 2
     for path in paths:
         print('----------')
-        print(f'Testing "{path}" "{user["username"]}" with role "{user["role"]}"')
+        print(f'Testing "{path}" with "{user["username"]}" with role "{user["role"]}"')
         print('->', session.get(URL + path).text.rstrip())
-# endregion
+        i += 1
+        if i == logout_at_count:
+            r = session.post(URL + '/api/invalidate-session')
+            if r.status_code != 200:
+                print(r.text)
+                exit(1)
+            print('----------')
+            print(f'Session for "{user["username"]}" invalidated!')
